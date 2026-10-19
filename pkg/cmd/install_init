@@ -1,25 +1,15 @@
 #!/bin/bash
-set -euo pipefail
-APPNAME="fn-ccswitch"
-TRIM_APPDEST="${TRIM_APPDEST:-/var/apps/$APPNAME/target}"
-TRIM_PKGVAR="${TRIM_PKGVAR:-/var/apps/$APPNAME/var}"
-TRIM_PKGHOME="${TRIM_PKGHOME:-/var/apps/$APPNAME/home}"
-TRIM_PKGETC="${TRIM_PKGETC:-/var/apps/$APPNAME/etc}"
-APPDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOGDIR="$TRIM_PKGVAR/log"
-log() { mkdir -p "$LOGDIR" 2>/dev/null || true; printf "[%s] %s\n" "$(date "+%F %T")" "$*" >>"$LOGDIR/lifecycle.log" 2>/dev/null || true; }
-fail() { printf "%s\n" "$*" >&2; log "FAIL: $*"; if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then printf "%s\n" "$*" >>"$TRIM_TEMP_LOGFILE" 2>/dev/null || true; fi; exit 1; }
-ensure_dirs() { mkdir -p "$TRIM_PKGVAR/data" "$LOGDIR" "$TRIM_PKGHOME" "$TRIM_PKGETC" || fail "无法创建应用目录"; }
-write_env() {
-  local port="${wizard_port:-17666}"
-  case "$port" in ""|*[!0-9]*) port=17666 ;; esac
-  if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then port=17666; fi
-  umask 077
-  printf "wizard_port=%s\n" "$port" >"$TRIM_PKGETC/env" || fail "无法写入 $TRIM_PKGETC/env"
-  chmod 600 "$TRIM_PKGETC/env" 2>/dev/null || true
-  log "env written: port=$port"
-}
+#
+# 安装前回调。
+#
+# 关键约束：fnOS 在调用本脚本时，尚未创建 /var/apps/<appname> 的目录骨架，
+# /vol1/@appdata、@apphome、@appconf 下的目标目录也还不存在；而本脚本以
+# 应用包用户身份运行，无权在 root 拥有的 /vol1 下 mkdir。因此这里
+# 绝不做任何目录创建或写文件动作，否则会以 "Permission denied" 失败，
+# 并被应用中心显示为「无法创建应用目录」，导致整个安装中止。
+#
+# 目录骨架由安装器在 install_init 之后以 root 创建，业务初始化放在
+# install_callback 里执行。
+set -uo pipefail   # 故意不加 -e：安装前回调必须始终成功
 
-ensure_dirs
-log "install_init done"
 exit 0

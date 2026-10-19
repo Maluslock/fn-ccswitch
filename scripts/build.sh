@@ -87,7 +87,17 @@ build_web() {
   fi
   fetch_source
   step "安装前端依赖（pnpm）"
-  ( cd "$BUILD/src" && pnpm install --frozen-lockfile --ignore-scripts )
+  # pnpm 需要可写的 HOME / 缓存目录；构建机默认 HOME 可能是只读的（例如装在 NAS 应用目录里），
+  # 否则会报 "unable to open database file"。统一把缓存重定向到 $BUILD/home。
+  local fhome="$BUILD/home"
+  mkdir -p "$fhome/.cache" "$fhome/.npm-cache" "$fhome/.config" "$BUILD/.pnpm-store"
+  ( cd "$BUILD/src" && \
+    HOME="$fhome" \
+    XDG_CACHE_HOME="$fhome/.cache" \
+    XDG_CONFIG_HOME="$fhome/.config" \
+    XDG_DATA_HOME="$fhome/.local/share" \
+    npm_config_cache="$fhome/.npm-cache" \
+    pnpm install --frozen-lockfile --ignore-scripts --store-dir "$BUILD/.pnpm-store" )
   step "构建 Web 前端（API 前缀 ${API_PREFIX}）"
   ( cd "$BUILD/src" && \
     VITE_CC_SWITCH_MODE=ws \
@@ -114,6 +124,11 @@ assemble() {
   chmod 0755 "$pkg/app/bin/cc-switch-web"
   chmod 0644 "$pkg/app/gateway-proxy.mjs"
   chmod 0755 "$pkg"/cmd/*
+  # 归一化权限：构建机 umask 可能是 077，会把 manifest / cmd / 图标打成 0600、0700，
+  # 安装器与应用包用户都可能读不到。统一成 0755 目录 + 0644 文件 + 可执行位。
+  find "$pkg" -type d -exec chmod 0755 {} +
+  find "$pkg" -type f -exec chmod 0644 {} +
+  chmod 0755 "$pkg/app/bin/cc-switch-web" "$pkg"/cmd/*
   du -sh "$pkg" | sed 's/^/    /'
 }
 
