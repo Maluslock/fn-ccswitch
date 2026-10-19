@@ -80,6 +80,25 @@ fetch_source() {
     rm -rf "$BUILD/src"; mkdir -p "$BUILD/src"
     tar xzf "$tarball" -C "$BUILD/src" --strip-components=1
   fi
+  apply_patches
+}
+
+# 上游源码的本地补丁（见 patches/README.md）。幂等：已应用则跳过；上游变动导致冲突则报错。
+apply_patches() {
+  local dir="$ROOT/patches" p
+  [ -d "$dir" ] || return 0
+  for p in "$dir"/*.patch; do
+    [ -f "$p" ] || continue
+    if patch -p1 --forward --silent --dry-run -d "$BUILD/src" <"$p" >/dev/null 2>&1; then
+      step "应用补丁 $(basename "$p")"
+      patch -p1 --forward --silent -d "$BUILD/src" <"$p" \
+        || die "补丁应用失败：$(basename "$p")（上游代码可能已变更）"
+    elif patch -p1 --forward --silent --reverse --dry-run -d "$BUILD/src" <"$p" >/dev/null 2>&1; then
+      echo "  已应用，跳过：$(basename "$p")"
+    else
+      die "补丁冲突：$(basename "$p")（上游代码可能已变更，请重新生成）"
+    fi
+  done
 }
 
 build_web() {
