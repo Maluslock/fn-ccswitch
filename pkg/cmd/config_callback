@@ -9,19 +9,46 @@ APPDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOGDIR="$TRIM_PKGVAR/log"
 log() { mkdir -p "$LOGDIR" 2>/dev/null || true; printf "[%s] %s\n" "$(date "+%F %T")" "$*" >>"$LOGDIR/lifecycle.log" 2>/dev/null || true; }
 fail() { printf "%s\n" "$*" >&2; log "FAIL: $*"; if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then printf "%s\n" "$*" >>"$TRIM_TEMP_LOGFILE" 2>/dev/null || true; fi; exit 1; }
+port_busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null || return 1; exec 3>&- 3<&- 2>/dev/null || true; return 0; }
+pick_free_port() {
+  local base="$1" n p
+  for n in $(seq 0 40); do
+    p=$((base + n))
+    [ "$p" -ge 1024 ] && [ "$p" -le 65535 ] || continue
+    port_busy "$p" || { printf '%s' "$p"; return 0; }
+  done
+  for p in $(seq 18666 18720); do
+    port_busy "$p" || { printf '%s' "$p"; return 0; }
+  done
+  return 1
+}
+warn() { printf "%s\n" "$*" >&2; log "WARN: $*"; if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then printf "%s\n" "$*" >>"$TRIM_TEMP_LOGFILE" 2>/dev/null || true; fi; }
 ensure_dirs() { mkdir -p "$TRIM_PKGVAR/data" "$LOGDIR" "$TRIM_PKGHOME" "$TRIM_PKGETC" || fail "无法创建应用目录"; }
 write_env() {
   local port="${wizard_port:-17666}"
   case "$port" in ""|*[!0-9]*) port=17666 ;; esac
-  if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then port=17666; fi
+  if [ "$port" -lt 1024 ] || [ "$port" -gt 65535 ]; then port=17666; fi
+  # 端口被占用时自动改用下一个空闲端口，避免一个无关的监听让整个安装失败回滚。
+  if port_busy "$port"; then
+    local alt
+    if alt="$(pick_free_port $((port + 1)))"; then
+      warn "端口 $port 已被其他程序占用，已自动改用 $alt。"
+      port="$alt"
+    else
+      warn "端口 $port 已被占用，且未找到可用替代端口；请在「应用设置 → 服务配置」里手动指定。"
+    fi
+  fi
   umask 077
-  printf "wizard_port=%s\n" "$port" >"$TRIM_PKGETC/env" || fail "无法写入 $TRIM_PKGETC/env"
+  printf 'wizard_port=%s\n' "$port" >"$TRIM_PKGETC/env" || fail "无法写入 $TRIM_PKGETC/env"
   chmod 600 "$TRIM_PKGETC/env" 2>/dev/null || true
   log "env written: port=$port"
 }
 
 ensure_dirs
 write_env
-"$APPDIR/cmd/main" restart || fail "应用重启失败，请查看 $LOGDIR/backend.log"
+"$APPDIR/cmd/main" restart || {
+  warn "配置已保存，但应用重启失败；请到「应用设置 → 服务配置」更换内部端口后手动启用。详见 $LOGDIR/backend.log"
+  exit 0
+}
 log "config_callback done"
 exit 0
