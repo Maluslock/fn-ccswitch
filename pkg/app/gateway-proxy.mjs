@@ -87,7 +87,8 @@ function cleanHeaders(headers) {
 function narrowCookiePaths(value) {
   return String(value)
     .split(/,(?=[^;]+?=)/)
-    .map((c) => c.replace(/;\s*path=\//i, `; Path=${PREFIX}/`))
+    // 只改写「整个站点」的 Path=/，已经有更具体路径的 cookie 保持原样
+    .map((c) => c.replace(/;\s*path=\/(?=;|$)/i, `; Path=${PREFIX}/`))
     .join(",");
 }
 

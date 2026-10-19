@@ -64,9 +64,9 @@ alive() {
 
 port_up() {
   local port="$1"
-  (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null || return 1
-  exec 3>&- 3<&- 2>/dev/null || true
-  return 0
+  # 只做一次连接探测：用子 shell 里的重定向，避免 exec 在非交互 shell 里
+  # 因 fd 关闭失败而直接终止脚本（曾导致端口冲突时提示语丢失、退出码 1 无输出）。
+  ( : >"/dev/tcp/127.0.0.1/$port" ) 2>/dev/null
 }
 
 cleanup_pids() {
