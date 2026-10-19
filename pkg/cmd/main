@@ -1,0 +1,208 @@
+#!/bin/bash
+# fn-ccswitch lifecycle: start | stop | status
+set -uo pipefail
+
+APPNAME="fn-ccswitch"
+TRIM_APPDEST="${TRIM_APPDEST:-/var/apps/$APPNAME/target}"
+TRIM_PKGVAR="${TRIM_PKGVAR:-/var/apps/$APPNAME/var}"
+TRIM_PKGHOME="${TRIM_PKGHOME:-/var/apps/$APPNAME/home}"
+TRIM_PKGETC="${TRIM_PKGETC:-/var/apps/$APPNAME/etc}"
+
+BIN="$TRIM_APPDEST/bin/cc-switch-web"
+GATEWAY="$TRIM_APPDEST/gateway-proxy.mjs"
+SOCK="$TRIM_APPDEST/app.sock"
+WEB_ROOT="$TRIM_APPDEST/web"
+LIBDIR="$TRIM_APPDEST/lib"
+LOGDIR="$TRIM_PKGVAR/log"
+PIDFILE="$TRIM_PKGVAR/app.pid"
+DEFAULT_PORT=17666
+NODE_BIN_DEFAULT="/var/apps/nodejs_v24/target/bin"
+
+log() {
+  mkdir -p "$LOGDIR" 2>/dev/null || true
+  printf '[%s] %s\n' "$(date '+%F %T')" "$*" >>"$LOGDIR/main.log" 2>/dev/null || true
+}
+
+fail() {
+  printf '%s\n' "$*" >&2
+  log "FAIL: $*"
+  if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then printf '%s\n' "$*" >>"$TRIM_TEMP_LOGFILE" 2>/dev/null || true; fi
+  exit 1
+}
+
+resolve_port() {
+  local port="$DEFAULT_PORT"
+  if [ -f "$TRIM_PKGETC/env" ]; then
+    local v
+    v="$(sed -n 's/^wizard_port=["'\'']*\([0-9]\{1,5\}\)["'\'']*$/\1/p' "$TRIM_PKGETC/env" | tail -n1)"
+    [ -n "$v" ] && port="$v"
+  fi
+  case "$port" in
+    ''|*[!0-9]*) port="$DEFAULT_PORT" ;;
+  esac
+  if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then port="$DEFAULT_PORT"; fi
+  printf '%s' "$port"
+}
+
+resolve_node() {
+  if [ -n "${NODE_BIN:-}" ] && [ -x "$NODE_BIN" ]; then printf '%s' "$NODE_BIN"; return; fi
+  if [ -x "$NODE_BIN_DEFAULT/node" ]; then printf '%s' "$NODE_BIN_DEFAULT/node"; return; fi
+  command -v node 2>/dev/null || true
+}
+
+read_pids() {
+  BACK_PID=""
+  GW_PID=""
+  if [ -f "$PIDFILE" ]; then
+    read -r BACK_PID GW_PID <"$PIDFILE" || true
+  fi
+}
+
+alive() {
+  [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null
+}
+
+port_up() {
+  local port="$1"
+  (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null || return 1
+  exec 3>&- 3<&- 2>/dev/null || true
+  return 0
+}
+
+cleanup_pids() {
+  rm -f "$PIDFILE" 2>/dev/null || true
+  rm -f "$SOCK" 2>/dev/null || true
+}
+
+wait_for() {
+  local label="$1" tries="$2"
+  shift 2
+  local i=0
+  while [ "$i" -lt "$tries" ]; do
+    if "$@"; then return 0; fi
+    i=$((i + 1))
+    sleep 1
+  done
+  log "timeout waiting for $label"
+  return 1
+}
+
+start() {
+  local port node
+  port="$(resolve_port)"
+  read_pids
+
+  if alive "$BACK_PID" && alive "$GW_PID" && port_up "$port"; then
+    log "already running (backend=$BACK_PID gateway=$GW_PID port=$port)"
+    exit 0
+  fi
+
+  [ -x "$BIN" ] || fail "后端程序缺失：$BIN"
+  [ -f "$GATEWAY" ] || fail "网关程序缺失：$GATEWAY"
+  [ -f "$WEB_ROOT/index.html" ] || fail "前端资源缺失：$WEB_ROOT/index.html"
+
+  node="$(resolve_node)"
+  [ -n "$node" ] || fail "未找到 Node.js 运行时（install_dep_apps=nodejs_v24）"
+
+  mkdir -p "$LOGDIR" "$TRIM_PKGVAR/data" "$TRIM_PKGHOME" || fail "无法创建运行目录"
+
+  # 旧的残留进程先清掉，避免端口占用导致新实例起不来
+  stop_quiet
+
+  if port_up "$port"; then
+    fail "端口 $port 已被其他程序占用，请在「应用设置 → 服务配置」里改用其他内部端口后重试。"
+  fi
+
+  log "starting backend port=$port"
+  (
+    export LD_LIBRARY_PATH="$LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export HOME="$TRIM_PKGHOME"
+    export CC_SWITCH_HOST=127.0.0.1
+    export CC_SWITCH_PORT="$port"
+    export CC_SWITCH_AUTO_PORT=false
+    export CC_SWITCH_CONFIG_DIR="$TRIM_PKGVAR/data"
+    exec "$BIN"
+  ) >>"$LOGDIR/backend.log" 2>&1 &
+  BACK_PID=$!
+
+  if ! wait_for "backend" 40 port_up "$port"; then
+    tail -n 20 "$LOGDIR/backend.log" >&2 2>/dev/null || true
+    kill "$BACK_PID" 2>/dev/null || true
+    cleanup_pids
+    fail "CC Switch 后端启动失败，详见 $LOGDIR/backend.log"
+  fi
+
+  log "starting gateway socket=$SOCK prefix=/app/$APPNAME"
+  (
+    export APPNAME="$APPNAME"
+    export PREFIX="/app/$APPNAME"
+    export SOCKET_PATH="$SOCK"
+    export WEB_ROOT="$WEB_ROOT"
+    export UPSTREAM_HOST=127.0.0.1
+    export UPSTREAM_PORT="$port"
+    exec "$node" "$GATEWAY"
+  ) >>"$LOGDIR/gateway.log" 2>&1 &
+  GW_PID=$!
+
+  if ! wait_for "gateway socket" 20 test -S "$SOCK"; then
+    tail -n 20 "$LOGDIR/gateway.log" >&2 2>/dev/null || true
+    kill "$GW_PID" "$BACK_PID" 2>/dev/null || true
+    cleanup_pids
+    fail "统一网关启动失败，详见 $LOGDIR/gateway.log"
+  fi
+
+  printf '%s %s\n' "$BACK_PID" "$GW_PID" >"$PIDFILE"
+  log "started backend=$BACK_PID gateway=$GW_PID port=$port"
+  exit 0
+}
+
+stop_quiet() {
+  read_pids
+  local pid
+  for pid in "$GW_PID" "$BACK_PID"; do
+    if alive "$pid"; then
+      kill -TERM "$pid" 2>/dev/null || true
+    fi
+  done
+  local i=0
+  while [ "$i" -lt 10 ]; do
+    local still=""
+    for pid in "$GW_PID" "$BACK_PID"; do
+      alive "$pid" && still="yes"
+    done
+    [ -z "$still" ] && break
+    i=$((i + 1))
+    sleep 1
+  done
+  for pid in "$GW_PID" "$BACK_PID"; do
+    if alive "$pid"; then kill -KILL "$pid" 2>/dev/null || true; fi
+  done
+  cleanup_pids
+}
+
+stop() {
+  stop_quiet
+  log "stopped"
+  exit 0
+}
+
+status() {
+  local port
+  port="$(resolve_port)"
+  read_pids
+  if alive "$BACK_PID" && alive "$GW_PID" && port_up "$port"; then
+    exit 0
+  fi
+  exit 3
+}
+
+case "${1:-}" in
+  start) start ;;
+  stop) stop ;;
+  status) status ;;
+  restart) stop_quiet; start ;;
+  *)
+    echo "usage: $0 {start|stop|status|restart}" >&2
+    exit 1
+    ;;
+esac

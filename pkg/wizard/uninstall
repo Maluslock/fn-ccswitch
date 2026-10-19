@@ -1,0 +1,18 @@
+[
+    {
+        "stepTitle": "卸载选项",
+        "items": [
+            {
+                "type": "tips",
+                "helpText": "卸载会停止应用服务。默认保留供应商配置与备份数据，重新安装后可继续使用。"
+            },
+            {
+                "type": "switch",
+                "field": "wizard_purge_data",
+                "label": "同时删除应用数据",
+                "initValue": "false",
+                "helpText": "开启后将删除 cc-switch 数据库、备份与网页登录配置，且不可恢复。"
+            }
+        ]
+    }
+]

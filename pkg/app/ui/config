@@ -1,0 +1,17 @@
+{
+    ".url": {
+        "fn-ccswitch.Application": {
+            "title": "CC Switch",
+            "icon": "images/icon_{0}.png",
+            "type": "iframe",
+            "protocol": "",
+            "gatewayPrefix": "/app/fn-ccswitch",
+            "gatewaySocket": "app.sock",
+            "url": "/app/fn-ccswitch",
+            "allUsers": false,
+            "control": {
+                "accessPerm": "editable"
+            }
+        }
+    }
+}

@@ -1,0 +1,25 @@
+#!/bin/bash
+set -euo pipefail
+APPNAME="fn-ccswitch"
+TRIM_APPDEST="${TRIM_APPDEST:-/var/apps/$APPNAME/target}"
+TRIM_PKGVAR="${TRIM_PKGVAR:-/var/apps/$APPNAME/var}"
+TRIM_PKGHOME="${TRIM_PKGHOME:-/var/apps/$APPNAME/home}"
+TRIM_PKGETC="${TRIM_PKGETC:-/var/apps/$APPNAME/etc}"
+APPDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOGDIR="$TRIM_PKGVAR/log"
+log() { mkdir -p "$LOGDIR" 2>/dev/null || true; printf "[%s] %s\n" "$(date "+%F %T")" "$*" >>"$LOGDIR/lifecycle.log" 2>/dev/null || true; }
+fail() { printf "%s\n" "$*" >&2; log "FAIL: $*"; if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then printf "%s\n" "$*" >>"$TRIM_TEMP_LOGFILE" 2>/dev/null || true; fi; exit 1; }
+ensure_dirs() { mkdir -p "$TRIM_PKGVAR/data" "$LOGDIR" "$TRIM_PKGHOME" "$TRIM_PKGETC" || fail "无法创建应用目录"; }
+write_env() {
+  local port="${wizard_port:-17666}"
+  case "$port" in ""|*[!0-9]*) port=17666 ;; esac
+  if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then port=17666; fi
+  umask 077
+  printf "wizard_port=%s\n" "$port" >"$TRIM_PKGETC/env" || fail "无法写入 $TRIM_PKGETC/env"
+  chmod 600 "$TRIM_PKGETC/env" 2>/dev/null || true
+  log "env written: port=$port"
+}
+
+ensure_dirs
+log "install_init done"
+exit 0
