@@ -12,6 +12,7 @@
 //  6. answer /healthz for cmd/main status without touching the backend
 
 import http from "node:http";
+import zlib from "node:zlib";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -154,15 +155,66 @@ async function serveStatic(req, res, target) {
   res.writeHead(404, { "content-type": "text/plain; charset=utf-8" }).end("Not Found");
 }
 
-function sendFile(req, res, file, stat) {
+const gzCache = new Map(); // key: etag, value: 压缩后的 Buffer
+const COMPRESSIBLE = new Set([".js", ".mjs", ".css", ".json", ".map", ".svg", ".html", ".txt", ".woff", ".woff2"]);
+
+async function sendFile(req, res, file, stat) {
   const ext = path.extname(file).toLowerCase();
-  const headers = {
+  const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+
+  const base = {
     "content-type": MIME[ext] || "application/octet-stream",
-    "content-length": stat.size,
     "cache-control": ext === ".html" ? "no-cache" : "public, max-age=31536000, immutable",
+    etag,
+    "last-modified": stat.mtime.toUTCString(),
   };
-  if (req.method === "HEAD") return res.writeHead(200, headers).end();
-  res.writeHead(200, headers);
+
+  // 协商缓存：重开 iframe 时 index.html 只回 304，几乎零成本
+  const inm = req.headers["if-none-match"];
+  const ims = req.headers["if-modified-src"] || req.headers["if-modified-since"];
+  const notModified =
+    (inm && inm.split(",").map((v) => v.trim()).includes(etag)) ||
+    (!inm && ims && Date.parse(ims) >= Math.floor(stat.mtimeMs / 1000) * 1000);
+  if (notModified) {
+    res.statusCode = 304;
+    for (const [k, v] of Object.entries(base)) res.setHeader(k, v);
+    res.end();
+    return;
+  }
+
+  const acceptsGzip = /\bgzip\b/i.test(req.headers["accept-encoding"] || "");
+  const gzip = acceptsGzip && COMPRESSIBLE.has(ext) && stat.size > 1024;
+  if (gzip) {
+    base["content-encoding"] = "gzip";
+    base["vary"] = "Accept-Encoding";
+  } else {
+    base["content-length"] = stat.size;
+  }
+
+  if (req.method === "HEAD") return res.writeHead(200, base).end();
+
+  if (gzip) {
+    // 压缩结果按 etag 缓存：hashed 资源内容不会变，避免每次请求都重新压缩
+    const cached = gzCache.get(etag);
+    if (cached) {
+      res.writeHead(200, base);
+      res.end(cached);
+      return;
+    }
+    try {
+      const buf = await fsp.readFile(file);
+      const out = zlib.gzipSync(buf, { level: 6 });
+      if (gzCache.size > 200) gzCache.clear();
+      gzCache.set(etag, out);
+      res.writeHead(200, base);
+      res.end(out);
+      return;
+    } catch {
+      /* 回退到流式发送 */
+    }
+  }
+
+  res.writeHead(200, base);
   fs.createReadStream(file).pipe(res);
 }
 

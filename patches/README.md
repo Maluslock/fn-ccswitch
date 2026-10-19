@@ -38,3 +38,13 @@
   补丁前连接关闭后再没有新连接（点任何按钮都报 `WebSocket connection failed`，必须刷新），
   补丁后控制台可见 `[WS] Reconnecting...` 并最终 `[WS] Connected`，页面无需刷新即可继续操作。
 - 上游若改动 `connect()` 结构，构建会报「补丁未生效或上游代码已变更」。
+
+## 0003-i18n-lazy-locales.patch
+
+- **文件**：`src/i18n/index.ts`、`vite.config.ts`
+- **目的**：四个语言包（en 179 KB / ja 223 KB / zh-TW 174 KB / zh 172 KB，合计约 750 KB 源码）原来全部静态导入，首屏必须全部下载。
+- **改动**：
+  1. `src/i18n/index.ts` 只静态导入中文，其余语言包改成 `import()` 按需加载：首屏按 `localStorage.language` / 浏览器语言只取当前语言；`languageChanged` 时再补加载并重放一次切换。
+  2. `vite.config.ts` 的 `manualChunks` 里把 `src/i18n/locales/` 排除在 `app-i18n` 之外——否则语言包会被塞进这个静态 chunk，等于还是全量预加载。
+- **效果**：`app-i18n` chunk 从 645 KB（gzip 203 KB）降到 147 KB（gzip 51 KB）。
+- **验证**：切换语言时网络面板能看到 `en-*.js` / `ja-*.js` 按需返回 200。

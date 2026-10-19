@@ -106,6 +106,15 @@ verify_patches() {
   if [ -f "$ws" ] && ! grep -q 'openSocket(' "$ws"; then
     die "补丁未生效或上游代码已变更：$ws 里没有 WebSocket 重试逻辑，请重新生成 patches/0002-ws-reconnect-retry.patch"
   fi
+  local i18n="$BUILD/src/src/i18n/index.ts"
+  if [ -f "$i18n" ]; then
+    if grep -qE '^import (en|ja|zhTW) from "\./locales/' "$i18n"; then
+      die "补丁未生效或上游代码已变更：$i18n 仍静态导入全部语言包，请重新生成 patches/0003-i18n-lazy-locales.patch"
+    fi
+    if ! grep -q 'LOCALE_LOADERS' "$i18n"; then
+      die "补丁未生效或上游代码已变更：$i18n 里没有按需加载语言包的逻辑"
+    fi
+  fi
 }
 
 build_web() {

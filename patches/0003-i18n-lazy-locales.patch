@@ -1,0 +1,109 @@
+--- a/src/i18n/index.ts
++++ b/src/i18n/index.ts
+@@ -1,10 +1,7 @@
+ import i18n from "i18next";
+ import { initReactI18next } from "react-i18next";
+ 
+-import en from "./locales/en.json";
+-import ja from "./locales/ja.json";
+ import zh from "./locales/zh.json";
+-import zhTW from "./locales/zh-TW.json";
+ 
+ type Language = "zh" | "zh-TW" | "en" | "ja";
+ 
+@@ -61,32 +58,60 @@
+   return DEFAULT_LANGUAGE;
+ };
+ 
+-const resources = {
+-  en: {
+-    translation: en,
+-  },
+-  ja: {
+-    translation: ja,
+-  },
++// 只把中文打进首屏包，其余语言按需异步加载（四个语言包合计约 750 KB）
++const LOCALE_LOADERS: Record<Language, () => Promise<{ default: object }>> = {
++  zh: async () => ({ default: zh }),
++  en: () => import("./locales/en.json"),
++  ja: () => import("./locales/ja.json"),
++  "zh-TW": () => import("./locales/zh-TW.json"),
++};
++
++const resources: Record<string, { translation: object }> = {
+   zh: {
+     translation: zh,
+   },
+-  "zh-TW": {
+-    translation: zhTW,
+-  },
+ };
+ 
+-export const i18nReady = i18n.use(initReactI18next).init({
+-  resources,
+-  lng: getInitialLanguage(), // 根据本地存储或系统语言选择默认语言
+-  fallbackLng: "en", // 如果缺少中文翻译则退回英文
++// 记录已经注入到 i18next 的语言，避免重复加载
++const loadedLocales = new Set<Language>(["zh"]);
+ 
+-  interpolation: {
+-    escapeValue: false, // React 已经默认转义
+-  },
++async function loadLocaleBundles(lang: string) {
++  const target = lang as Language;
++  if (!(target in LOCALE_LOADERS) || loadedLocales.has(target)) return;
++  const mod = await LOCALE_LOADERS[target]();
++  loadedLocales.add(target);
++  i18n.addResourceBundle(target, "translation", mod.default, true, true);
++  // 资源到位后重放一次切换，让界面用新语言重新渲染
++  if (i18n.language === target) void i18n.changeLanguage(target);
++}
++
++const initialLanguage = getInitialLanguage();
++
++export const i18nReady = (async () => {
++  // 首屏只等当前语言：非中文时先把对应语言包取回来，再初始化
++  if (initialLanguage !== "zh") {
++    const mod = await LOCALE_LOADERS[initialLanguage]();
++    loadedLocales.add(initialLanguage);
++    resources[initialLanguage] = { translation: mod.default };
++  }
++
++  const ready = i18n.use(initReactI18next).init({
++    resources,
++    lng: initialLanguage, // 根据本地存储或系统语言选择默认语言
++    fallbackLng: "zh", // 中文始终可用，缺翻译时退回中文
++
++    interpolation: {
++      escapeValue: false, // React 已经默认转义
++    },
++
++    debug: false,
++  });
++
++  i18n.on("languageChanged", (lng) => {
++    void loadLocaleBundles(lng);
++  });
+ 
+-  // 开发模式下显示调试信息
+-  debug: false,
+-});
++  return ready;
++})();
+ 
+ export default i18n;
+--- a/vite.config.ts
++++ b/vite.config.ts
+@@ -97,6 +97,12 @@
+     return "app-platform";
+   }
+ 
++  // 语言包（src/i18n/locales/*.json）走动态 import 按需加载，
++  // 不能被固定分到 app-i18n 这个静态 chunk 里，否则等于全量预加载。
++  if (id.includes("/src/i18n/locales/")) {
++    return undefined;
++  }
++
+   if (id.includes("/src/i18n/")) {
+     return "app-i18n";
+   }

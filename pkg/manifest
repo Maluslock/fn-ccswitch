@@ -1,5 +1,5 @@
 appname=fn-ccswitch
-version=0.1.6
+version=0.1.7
 display_name=CC Switch
 desc=在飞牛桌面里管理 Claude Code / Codex / Gemini 等 AI 工具的供应商配置：一键切换、备份、MCP 与提示词统一管理。
 source=thirdparty
