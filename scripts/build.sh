@@ -13,6 +13,7 @@ BUILD="${BUILD_DIR:-$ROOT/build}"
 APPNAME="fn-ccswitch"
 CCSW_TAG="${CCSW_TAG:-v3.20.2}"
 API_PREFIX="/app/${APPNAME}/api"
+PAGE_PREFIX="/app/${APPNAME}/"
 LIBS_URL="${LIBS_URL:-http://deb.debian.org/debian/pool/main/o/openssl/libssl1.1_1.1.1w-0+deb11u1_amd64.deb}"
 FNPACK_BIN="${FNPACK_BIN:-fnpack}"
 
@@ -99,10 +100,12 @@ build_web() {
     npm_config_cache="$fhome/.npm-cache" \
     pnpm install --frozen-lockfile --ignore-scripts --store-dir "$BUILD/.pnpm-store" )
   step "构建 Web 前端（API 前缀 ${API_PREFIX}）"
+  # --base 必须是绝对路径：桌面 iframe 的地址是 /app/fn-ccswitch（没有结尾斜杠），
+  # 若 index.html 里是 "./assets/..." 就会解析到 /app/assets/... → 404 → 白屏。
   ( cd "$BUILD/src" && \
     VITE_CC_SWITCH_MODE=ws \
     VITE_CC_SWITCH_API_BASE="$API_PREFIX" \
-    ./node_modules/.bin/vite build --mode web )
+    ./node_modules/.bin/vite build --mode web --base="$PAGE_PREFIX" )
   [ -f "$BUILD/src/dist/index.html" ] || die "前端构建失败：找不到 dist/index.html"
   step "复制前端产物到 $BUILD/web"
   rm -rf "$BUILD/web"; mkdir -p "$BUILD/web"
