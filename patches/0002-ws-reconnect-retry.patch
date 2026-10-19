@@ -1,0 +1,101 @@
+--- a/src/lib/transport/wsTransport.ts	2026-10-19 14:11:51.739441739 +0800
++++ b/src/lib/transport/wsTransport.ts	2026-10-19 14:11:51.739498644 +0800
+@@ -44,38 +44,84 @@
+     if (this.socket?.readyState === WebSocket.OPEN) return;
+     if (this.connectPromise) return this.connectPromise;
+ 
+-    this.connectPromise = new Promise<void>((resolve, reject) => {
++    // 应用/网关重启、网络抖动时自动重试几次，不把瞬时失败暴露给用户；
++    // 彻底失败必须清掉缓存的 Promise，否则后续调用会一直拿到同一个已拒绝的 Promise。
++    this.connectPromise = this.openSocket(5, 800).catch((err) => {
++      this.connectPromise = null;
++      throw err;
++    });
++
++    return this.connectPromise;
++  }
++
++  private openSocket(attemptsLeft: number, retryDelayMs: number): Promise<void> {
++    return new Promise<void>((resolve, reject) => {
+       const socket = new WebSocket(this.url);
+       this.socket = socket;
++      let opened = false;
++      let failed = false;
++      let timer: ReturnType<typeof setTimeout> | null = null;
++
++      // 握手可能既不成功也不报错（对端进程突然消失、代理半开），
++      // 必须有超时兜底，否则连接会永远卡在 CONNECTING。
++      const fail = () => {
++        if (failed || opened) return;
++        failed = true;
++        if (timer) clearTimeout(timer);
++        try {
++          socket.close();
++        } catch {
++          /* ignore */
++        }
++        if (attemptsLeft > 1) {
++          setTimeout(() => {
++            this.openSocket(attemptsLeft - 1, retryDelayMs).then(resolve, reject);
++          }, retryDelayMs);
++        } else {
++          this.connectPromise = null;
++          if (!this.closedByUser) this.scheduleReconnect();
++          reject(new Error("WebSocket connection failed"));
++        }
++      };
++
++      timer = setTimeout(fail, 8000);
+ 
+       socket.onopen = () => {
++        opened = true;
++        if (timer) clearTimeout(timer);
+         console.log("[WS] Connected");
+         this.reconnectDelay = 1000;
+         this.setupListeners(socket);
++        socket.onclose = () => this.handleSocketClosed();
+         resolve();
+       };
+ 
+       socket.onerror = (ev) => {
++        if (opened) return;
+         console.error("[WS] Connection error", ev);
+-        reject(new Error("WebSocket connection failed"));
++        fail();
+       };
+ 
+       socket.onclose = () => {
+-        console.log("[WS] Connection closed");
+-        this.connectPromise = null;
+-
+-        for (const [, pending] of this.pendingRequests) {
+-          pending.reject(new Error("Connection closed"));
+-        }
+-        this.pendingRequests.clear();
+-
+-        if (!this.closedByUser) {
+-          this.scheduleReconnect();
+-        }
++        if (opened) return;
++        fail();
+       };
+     });
++  }
+ 
+-    return this.connectPromise;
++  private handleSocketClosed() {
++    console.log("[WS] Connection closed");
++    this.socket = null;
++    this.connectPromise = null;
++
++    for (const [, pending] of this.pendingRequests) {
++      pending.reject(new Error("Connection closed"));
++    }
++    this.pendingRequests.clear();
++
++    if (!this.closedByUser) {
++      this.scheduleReconnect();
++    }
+   }
+ 
+   private setupListeners(socket: WebSocket) {

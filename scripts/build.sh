@@ -99,10 +99,12 @@ apply_patches() {
 
 # 校验补丁目标文件的最终状态：全部过渡动画必须已经是 0，否则说明上游改了代码。
 verify_patches() {
-  local app="$BUILD/src/src/App.tsx"
-  [ -f "$app" ] || return 0
-  if grep -qE 'transition=\{\{ duration: (0\.15|0\.2) \}\}' "$app"; then
+  local app="$BUILD/src/src/App.tsx" ws="$BUILD/src/src/lib/transport/wsTransport.ts"
+  if [ -f "$app" ] && grep -qE 'transition=\{\{ duration: (0\.15|0\.2) \}\}' "$app"; then
     die "补丁未生效或上游代码已变更：$app 里仍有 0.15/0.2 秒的过渡动画，请重新生成 patches/0001-app-switch-no-fade.patch"
+  fi
+  if [ -f "$ws" ] && ! grep -q 'openSocket(' "$ws"; then
+    die "补丁未生效或上游代码已变更：$ws 里没有 WebSocket 重试逻辑，请重新生成 patches/0002-ws-reconnect-retry.patch"
   fi
 }
 
