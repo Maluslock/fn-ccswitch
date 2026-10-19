@@ -4,6 +4,16 @@
 
 > 上游 cc-switch 是 Tauri 桌面程序，fnOS 桌面只能以 iframe / 新标签页承载 Web 应用，所以这里包装的是社区维护的 Web 版 `cc-switch-web`。
 
+## 安装
+
+1. 从 [Releases](https://github.com/Maluslock/fn-ccswitch/releases) 下载 `fn-ccswitch.fpk`；
+2. 飞牛「应用中心 → 手动安装」，选择该 fpk；
+3. 安装向导里填一个**仅本机使用**的内部端口（默认 `17666`，保持默认即可）；
+4. 装完在飞牛桌面点图标打开，窗口内直接使用。
+
+> 应用通过飞牛统一网关访问（`/app/fn-ccswitch`），浏览器侧不额外开放端口；
+> 内部的 `17666` 只监听 `127.0.0.1`。
+
 ## 它是怎么跑起来的
 
 ```

@@ -1,0 +1,23 @@
+# NOTICE
+
+fn-ccswitch 是**打包与集成**项目，仓库本身不收录上游源码，也不分发上游二进制。
+
+## 上游项目
+
+| 项目 | 地址 | 许可 | 在本项目中的角色 |
+| --- | --- | --- | --- |
+| CC Switch（桌面版） | https://github.com/farion1231/cc-switch | MIT | 原始产品与数据格式来源 |
+| cc-switch-web（Web 版） | https://github.com/cp-yu/cc-switch-web | MIT | 我们打包的服务器二进制与前端源码 |
+
+## 二进制分发
+
+`scripts/build.sh` 在构建时会从 `cp-yu/cc-switch-web` 的 GitHub Release 下载官方
+`cc-switch-web-v*-linux-x86_64-ubuntu20.04` 二进制，并解包 Debian 提供的
+`libssl1.1` / `libcrypto.so.1.1` 共享库，一并放进 fpk。**本仓库与发布产物中不包含
+这些组件的源代码**，仅做原样搬运与版本锁定。
+
+## 补丁
+
+`patches/` 下的补丁针对上游 v3.20.2 源码做最小修改（去掉切换时的淡出动画、
+WebSocket 断线重试、语言包按需加载），修改部分同样以 MIT 许可发布，归属上游作者。
+补丁在上游版本变更后可能失效，`scripts/build.sh` 会校验结果并在失效时报错。
