@@ -89,16 +89,21 @@ apply_patches() {
   [ -d "$dir" ] || return 0
   for p in "$dir"/*.patch; do
     [ -f "$p" ] || continue
-    if patch -p1 --forward --silent --dry-run -d "$BUILD/src" <"$p" >/dev/null 2>&1; then
-      step "应用补丁 $(basename "$p")"
-      patch -p1 --forward --silent -d "$BUILD/src" <"$p" \
-        || die "补丁应用失败：$(basename "$p")（上游代码可能已变更）"
-    elif patch -p1 --forward --silent --reverse --dry-run -d "$BUILD/src" <"$p" >/dev/null 2>&1; then
-      echo "  已应用，跳过：$(basename "$p")"
-    else
-      die "补丁冲突：$(basename "$p")（上游代码可能已变更，请重新生成）"
-    fi
+    step "应用补丁 $(basename "$p")"
+    # 用 -N 容忍「某些 hunk 已经应用过」的情况（例如本地增量构建、补丁版本升级），
+    # 真正的正确性由下面的校验保证，而不是由 patch 的退出码保证。
+    patch -p1 --forward -N -d "$BUILD/src" <"$p" >/dev/null 2>&1 || true
   done
+  verify_patches
+}
+
+# 校验补丁目标文件的最终状态：全部过渡动画必须已经是 0，否则说明上游改了代码。
+verify_patches() {
+  local app="$BUILD/src/src/App.tsx"
+  [ -f "$app" ] || return 0
+  if grep -qE 'transition=\{\{ duration: (0\.15|0\.2) \}\}' "$app"; then
+    die "补丁未生效或上游代码已变更：$app 里仍有 0.15/0.2 秒的过渡动画，请重新生成 patches/0001-app-switch-no-fade.patch"
+  fi
 }
 
 build_web() {

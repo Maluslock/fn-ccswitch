@@ -1,5 +1,5 @@
---- a/src/App.tsx	2026-10-19 13:50:26.085123223 +0800
-+++ b/src/App.tsx	2026-10-19 13:50:26.086261023 +0800
+--- a/src/App.tsx	2026-10-19 13:57:57.646291471 +0800
++++ b/src/App.tsx	2026-10-19 13:57:57.646451062 +0800
 @@ -1022,7 +1022,7 @@
                      initial={{ opacity: 0 }}
                      animate={{ opacity: 1 }}
@@ -9,3 +9,21 @@
                      className="space-y-4"
                    >
                      <ProviderList
+@@ -1094,7 +1094,7 @@
+           initial={{ opacity: 0 }}
+           animate={{ opacity: 1 }}
+           exit={{ opacity: 0 }}
+-          transition={{ duration: 0.2 }}
++          transition={{ duration: 0 }}
+         >
+           <Suspense fallback={lazyContentFallback}>{content}</Suspense>
+         </motion.div>
+@@ -1460,7 +1460,7 @@
+                           initial={{ opacity: 0 }}
+                           animate={{ opacity: 1 }}
+                           exit={{ opacity: 0 }}
+-                          transition={{ duration: 0.15 }}
++                          transition={{ duration: 0 }}
+                         >
+                           {activeApp === "hermes" ? (
+                             <>
